@@ -124,6 +124,7 @@ model Application {
   formSnapshot    String?  // JSON: detected fields + mapped values
   logs            String?  // JSON: array of step logs
   errorMessage    String?
+  progressMessage String?  // live one-liner describing current step
   appliedAt       DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

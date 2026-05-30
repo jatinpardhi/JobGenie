@@ -9,6 +9,7 @@ type App = {
   matchScore: number | null;
   coverLetter: string | null;
   errorMessage: string | null;
+  progressMessage: string | null;
   logs: string | null;
   createdAt: string;
 };
@@ -47,6 +48,11 @@ export default function ApplicationsPage() {
                 <span className="font-medium truncate max-w-[60%]">{a.jobTitle ?? a.jobUrl}</span>
                 <span className="badge bg-slate-100 dark:bg-slate-800">{a.status}</span>
               </div>
+              {a.progressMessage && (
+                <div className="mt-1 text-xs text-slate-600 dark:text-slate-300 truncate" title={a.progressMessage}>
+                  {a.progressMessage}
+                </div>
+              )}
               <div className="mt-1 text-xs text-slate-500">{new Date(a.createdAt).toLocaleString()}</div>
             </button>
           ))}

@@ -59,14 +59,31 @@ export async function scoreMatch(input: {
   profile: Record<string, unknown>;
   resumeText: string;
 }): Promise<{ score: number; reasons: string[]; missing: string[] }> {
-  return jsonCompletion(
-    SYSTEM_PROMPTS.matchScorer,
-    JSON.stringify({
-      job: { title: input.jobTitle, description: input.jobDescription.slice(0, 4000) },
-      profile: input.profile,
-      resume: input.resumeText.slice(0, 6000),
-    })
-  );
+  let raw: { score?: number; reasons?: string[]; missing?: string[] } = {};
+  try {
+    raw = await jsonCompletion(
+      SYSTEM_PROMPTS.matchScorer,
+      JSON.stringify({
+        job: { title: input.jobTitle, description: input.jobDescription.slice(0, 4000) },
+        profile: input.profile,
+        resume: input.resumeText.slice(0, 6000),
+      })
+    );
+  } catch (e) {
+    // LLM returned non-JSON — don't kill the pipeline.
+    return { score: 0.6, reasons: ["scoring unavailable (LLM parse error), proceeding"], missing: [] };
+  }
+  const reasons = Array.isArray(raw.reasons) ? raw.reasons : [];
+  const missing = Array.isArray(raw.missing) ? raw.missing : [];
+  let score = typeof raw.score === "number" ? raw.score : NaN;
+  // Allow models that return 0..100 instead of 0..1.
+  if (score > 1 && score <= 100) score = score / 100;
+  if (!Number.isFinite(score)) score = 0.6;
+  // If the model gave a 0 with no rationale, treat as "couldn't judge" rather than hard-reject.
+  if (score === 0 && reasons.length === 0) {
+    return { score: 0.6, reasons: ["model returned 0 with no rationale — proceeding cautiously"], missing };
+  }
+  return { score, reasons, missing };
 }
 
 export async function synthesizeQuestions(
