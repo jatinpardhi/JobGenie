@@ -15,10 +15,10 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 
     await prisma.application.update({
       where: { id: app.id },
-      data: { status: "PENDING" },
+      data: { status: "PENDING", progressMessage: "Approved — submitting…" },
     });
     await enqueueApply(
-      { applicationId: app.id, userId, jobUrl: app.jobUrl }
+      { applicationId: app.id, userId, jobUrl: app.jobUrl, bypassApproval: true }
     );
     return NextResponse.json({ ok: true });
   } catch (e) {

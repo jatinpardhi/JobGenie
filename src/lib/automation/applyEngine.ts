@@ -13,6 +13,8 @@ export interface ApplyJobInput {
   applicationId: string;
   userId: string;
   jobUrl: string;
+  /** Skip the AWAITING_APPROVAL gate (set by /approve route). */
+  bypassApproval?: boolean;
 }
 
 export async function runApplication(input: ApplyJobInput) {
@@ -143,7 +145,7 @@ export async function runApplication(input: ApplyJobInput) {
       }
     }
 
-    if (env.humanApproval) {
+    if (env.humanApproval && !input.bypassApproval) {
       await prisma.application.update({
         where: { id: applicationId },
         data: {

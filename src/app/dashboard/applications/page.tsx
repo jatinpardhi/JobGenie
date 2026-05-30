@@ -16,21 +16,26 @@ type App = {
 
 export default function ApplicationsPage() {
   const [apps, setApps] = useState<App[]>([]);
-  const [selected, setSelected] = useState<App | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   async function load() {
     const r = await fetch("/api/applications");
     setApps(await r.json());
   }
-  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
+  useEffect(() => { load(); const t = setInterval(load, 3000); return () => clearInterval(t); }, []);
+
+  const selected = apps.find((a) => a.id === selectedId) ?? null;
 
   async function retry(id: string) {
-    await fetch(`/api/applications/${id}/retry`, { method: "POST" });
-    load();
+    setBusyId(id);
+    try { await fetch(`/api/applications/${id}/retry`, { method: "POST" }); }
+    finally { setBusyId(null); load(); }
   }
   async function approve(id: string) {
-    await fetch(`/api/applications/${id}/approve`, { method: "POST" });
-    load();
+    setBusyId(id);
+    try { await fetch(`/api/applications/${id}/approve`, { method: "POST" }); }
+    finally { setBusyId(null); load(); }
   }
 
   return (
@@ -41,8 +46,8 @@ export default function ApplicationsPage() {
           {apps.map((a) => (
             <button
               key={a.id}
-              onClick={() => setSelected(a)}
-              className={`block w-full border-b border-slate-200 p-3 text-left text-sm last:border-b-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900 ${selected?.id === a.id ? "bg-slate-50 dark:bg-slate-900" : ""}`}
+              onClick={() => setSelectedId(a.id)}
+              className={`block w-full border-b border-slate-200 p-3 text-left text-sm last:border-b-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900 ${selectedId === a.id ? "bg-slate-50 dark:bg-slate-900" : ""}`}
             >
               <div className="flex items-center justify-between">
                 <span className="font-medium truncate max-w-[60%]">{a.jobTitle ?? a.jobUrl}</span>
@@ -72,12 +77,35 @@ export default function ApplicationsPage() {
             </header>
             <div className="flex gap-2">
               {selected.status === "AWAITING_APPROVAL" && (
-                <button className="btn-primary" onClick={() => approve(selected.id)}>Approve &amp; submit</button>
+                <button
+                  className="btn-primary disabled:opacity-50"
+                  disabled={busyId === selected.id}
+                  onClick={() => approve(selected.id)}
+                >
+                  {busyId === selected.id ? "Submitting…" : "Approve & submit"}
+                </button>
               )}
               {(selected.status === "FAILED" || selected.status === "SKIPPED") && (
-                <button className="btn-ghost" onClick={() => retry(selected.id)}>Retry</button>
+                <button
+                  className="btn-ghost disabled:opacity-50"
+                  disabled={busyId === selected.id}
+                  onClick={() => retry(selected.id)}
+                >
+                  {busyId === selected.id ? "Restarting…" : "Retry"}
+                </button>
+              )}
+              {selected.status === "RUNNING" && (
+                <span className="text-sm text-slate-500">Pipeline running… see live log below.</span>
+              )}
+              {selected.status === "SUBMITTED" && (
+                <span className="text-sm font-medium text-green-700 dark:text-green-400">Submitted ✓</span>
               )}
             </div>
+            {selected.progressMessage && (
+              <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                <span className="font-semibold">Current step:</span> {selected.progressMessage}
+              </div>
+            )}
             {selected.errorMessage && (
               <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
                 {selected.errorMessage}

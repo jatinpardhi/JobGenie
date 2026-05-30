@@ -43,7 +43,7 @@ export function getQueueMode(): "redis" | "inline" {
   return mode;
 }
 
-export async function enqueueApply(data: { applicationId: string; userId: string; jobUrl: string }) {
+export async function enqueueApply(data: { applicationId: string; userId: string; jobUrl: string; bypassApproval?: boolean }) {
   await ready;
   if (mode === "redis" && applyQueue) {
     await applyQueue.add("apply", data);
