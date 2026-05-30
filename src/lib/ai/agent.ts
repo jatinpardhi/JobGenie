@@ -22,6 +22,7 @@ export async function mapFieldsToProfile(
   resumeText?: string,
   savedAnswers: Record<string, string> = {}
 ): Promise<MappedAnswer[]> {
+  if (!fields || fields.length === 0) return [];
   const payload = JSON.stringify(
     {
       fields,
