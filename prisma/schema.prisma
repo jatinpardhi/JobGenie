@@ -1,0 +1,134 @@
+// JobGenie data model
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String     @id @default(cuid())
+  email         String     @unique
+  passwordHash  String?
+  name          String?
+  image         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  profile       Profile?
+  resumes       Resume[]
+  answers       SavedAnswer[]
+  searches      JobSearch[]
+  applications  Application[]
+  accounts      OAuthAccount[]
+  sessions      Session[]
+}
+
+model OAuthAccount {
+  id                 String  @id @default(cuid())
+  userId             String
+  provider           String
+  providerAccountId  String
+  accessToken        String?
+  refreshToken       String?
+  expiresAt          Int?
+  user               User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Profile {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  fullName           String?
+  phone              String?
+  location           String?
+  linkedinUrl        String?
+  githubUrl          String?
+  portfolioUrl       String?
+  yearsOfExperience  Int?
+  currentCtc         String?
+  expectedCtc        String?
+  noticePeriod       String?
+  workAuthorization  String?
+  visaSponsorship    Boolean?
+  preferredLocations String?  // CSV list
+  workModes          String?  // CSV: remote,hybrid,onsite
+  data               String?  // JSON blob for additional fields
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Resume {
+  id          String   @id @default(cuid())
+  userId      String
+  label       String
+  filePath    String
+  parsedText  String?
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Reusable answers to recurring application questions, keyed by a
+/// semantic question fingerprint produced by the AI layer.
+model SavedAnswer {
+  id              String   @id @default(cuid())
+  userId          String
+  questionHash    String
+  questionText    String
+  answer          String
+  fieldType       String?  // text, select, radio, checkbox, file
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([userId, questionHash])
+}
+
+model JobSearch {
+  id           String   @id @default(cuid())
+  userId       String
+  portalUrl    String
+  keywords     String
+  filters      String?  // JSON blob: location, workMode, experience, salary, type
+  schedule     String?  // cron expression for scheduled runs
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  applications Application[]
+}
+
+model Application {
+  id              String   @id @default(cuid())
+  userId          String
+  searchId        String?
+  jobUrl          String
+  jobTitle        String?
+  company         String?
+  location        String?
+  status          String   @default("PENDING")
+  matchScore      Float?
+  coverLetter     String?
+  formSnapshot    String?  // JSON: detected fields + mapped values
+  logs            String?  // JSON: array of step logs
+  errorMessage    String?
+  appliedAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  search          JobSearch? @relation(fields: [searchId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, jobUrl])
+  @@index([userId, status])
+}
+
+// ApplicationStatus values (SQLite has no enums):
+// PENDING, AWAITING_APPROVAL, RUNNING, SUBMITTED, FAILED, SKIPPED, NEEDS_INFO

@@ -1,0 +1,105 @@
+import IORedis from "ioredis";
+import { Queue, QueueEvents } from "bullmq";
+import { env } from "./env";
+import { logger } from "./logger";
+
+const log = logger.child("queue");
+
+export const APPLY_QUEUE = "jobgenie:apply";
+export const SEARCH_QUEUE = "jobgenie:search";
+
+let mode: "redis" | "inline" = "inline";
+export let connection: IORedis | null = null;
+export let applyQueue: Queue | null = null;
+export let searchQueue: Queue | null = null;
+export let applyEvents: QueueEvents | null = null;
+
+const ready: Promise<void> = (async () => {
+  try {
+    const probe = new IORedis(env.redisUrl, {
+      maxRetriesPerRequest: 1,
+      connectTimeout: 800,
+      lazyConnect: true,
+    });
+    await probe.connect();
+    await probe.ping();
+    await probe.quit();
+
+    connection = new IORedis(env.redisUrl, { maxRetriesPerRequest: null });
+    applyQueue = new Queue(APPLY_QUEUE, { connection: connection as any });
+    searchQueue = new Queue(SEARCH_QUEUE, { connection: connection as any });
+    applyEvents = new QueueEvents(APPLY_QUEUE, { connection: connection as any });
+    mode = "redis";
+    log.info("Queue using Redis", { url: env.redisUrl });
+  } catch (err) {
+    log.warn("Redis unavailable, falling back to inline execution", {
+      err: String(err),
+    });
+    mode = "inline";
+  }
+})();
+
+export function getQueueMode(): "redis" | "inline" {
+  return mode;
+}
+
+export async function enqueueApply(data: { applicationId: string; userId: string; jobUrl: string }) {
+  await ready;
+  if (mode === "redis" && applyQueue) {
+    await applyQueue.add("apply", data);
+    return;
+  }
+  // Lazy-load to avoid circular imports at module init.
+  const { runApplication } = await import("./automation/applyEngine");
+  setImmediate(() => {
+    runApplication(data).catch((e) => log.error("inline apply failed", { err: String(e) }));
+  });
+}
+
+export async function enqueueSearch(data: { searchId: string; userId: string }) {
+  await ready;
+  if (mode === "redis" && searchQueue) {
+    await searchQueue.add("search", data);
+    return;
+  }
+  const [{ discoverJobs }, { prisma }] = await Promise.all([
+    import("./automation/searchEngine"),
+    import("./db"),
+  ]);
+  setImmediate(async () => {
+    try {
+      const search = await prisma.jobSearch.findUniqueOrThrow({ where: { id: data.searchId } });
+      const jobs = await discoverJobs({
+        portalUrl: search.portalUrl,
+        keywords: search.keywords,
+        filters: search.filters ? JSON.parse(search.filters) : undefined,
+      });
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayCount = await prisma.application.count({
+        where: { userId: data.userId, createdAt: { gte: today } },
+      });
+      let budget = Math.max(0, env.dailyLimit - todayCount);
+      for (const j of jobs) {
+        if (budget <= 0) break;
+        const existing = await prisma.application.findUnique({
+          where: { userId_jobUrl: { userId: data.userId, jobUrl: j.url } },
+        });
+        if (existing) continue;
+        const app = await prisma.application.create({
+          data: {
+            userId: data.userId,
+            searchId: data.searchId,
+            jobUrl: j.url,
+            jobTitle: j.title,
+            status: "PENDING",
+          },
+        });
+        await enqueueApply({ applicationId: app.id, userId: data.userId, jobUrl: j.url });
+        budget--;
+      }
+    } catch (e) {
+      log.error("inline search failed", { err: String(e) });
+    }
+  });
+}

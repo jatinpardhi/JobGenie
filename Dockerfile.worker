@@ -1,0 +1,7 @@
+FROM mcr.microsoft.com/playwright:v1.49.0-jammy
+WORKDIR /app
+COPY package.json ./
+RUN npm install --omit=optional --ignore-scripts
+COPY . .
+RUN npx prisma generate
+CMD ["npx", "tsx", "src/worker/index.ts"]

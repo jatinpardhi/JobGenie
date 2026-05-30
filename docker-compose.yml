@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: jobgenie
+      POSTGRES_PASSWORD: jobgenie
+      POSTGRES_DB: jobgenie
+    ports: ["5432:5432"]
+    volumes: ["db-data:/var/lib/postgresql/data"]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  ollama:
+    image: ollama/ollama:latest
+    ports: ["11434:11434"]
+    volumes: ["ollama-data:/root/.ollama"]
+    # Pull a default model on first start. Override OLLAMA_MODEL to change.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        sleep 3
+        ollama pull ${OLLAMA_MODEL:-llama3.1} || true
+        wait
+
+  web:
+    build: { context: ., dockerfile: Dockerfile }
+    env_file: .env
+    environment:
+      OPENAI_BASE_URL: http://ollama:11434/v1
+    depends_on: [db, redis, ollama]
+    ports: ["3000:3000"]
+    command: sh -c "npx prisma migrate deploy && npm run start"
+
+  worker:
+    build: { context: ., dockerfile: Dockerfile.worker }
+    env_file: .env
+    environment:
+      OPENAI_BASE_URL: http://ollama:11434/v1
+    depends_on: [db, redis, ollama]
+    volumes: ["./uploads:/app/uploads"]
+
+volumes:
+  db-data: {}
+  ollama-data: {}
