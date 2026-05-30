@@ -166,34 +166,69 @@ export async function runApplication(input: ApplyJobInput) {
     const filled = await fillForm(page, answers, resume.filePath);
     await progress(`Filled ${filled?.filled ?? "?"} field${filled?.filled === 1 ? "" : "s"}.`);
 
+    let submitClicked = false;
+    let lastClickResult: string = "none";
     for (let i = 0; i < 5; i++) {
       await progress(`Step ${i + 1}: clicking Next/Submit…`);
       const result = await clickNextOrSubmit(page);
       push("Step click", { step: i, result });
+      lastClickResult = result;
       if (result === "submit") {
+        submitClicked = true;
         await progress("Submit button clicked.");
         break;
       }
       if (result === "none") {
-        await progress("No further button found — assuming complete.");
+        await progress("No further button found.");
         break;
       }
       await page.waitForLoadState("domcontentloaded").catch(() => {});
     }
 
-    await prisma.application.update({
-      where: { id: applicationId },
-      data: {
-        status: "SUBMITTED",
-        matchScore: score.score,
-        coverLetter: cover,
-        formSnapshot: JSON.stringify({ fields: probe.fields, answers }),
-        appliedAt: new Date(),
-        progressMessage: "Submitted!",
-        logs: JSON.stringify(stepLogs),
-      },
-    });
-    push("Application submitted");
+    // Honest terminal state:
+    //  - SUBMITTED only if we actually clicked a submit button AND wrote some fields
+    //    (a 0-field "submit" on a marketing page is meaningless).
+    //  - NEEDS_INFO when we couldn't find a form / submit button — the user should
+    //    open the link and apply manually (often the real ATS is behind an "Apply"
+    //    redirect we can't follow without login).
+    const fieldsFilled = filled?.filled ?? 0;
+    const reallySubmitted = submitClicked && fieldsFilled > 0;
+
+    if (reallySubmitted) {
+      await prisma.application.update({
+        where: { id: applicationId },
+        data: {
+          status: "SUBMITTED",
+          matchScore: score.score,
+          coverLetter: cover,
+          formSnapshot: JSON.stringify({ fields: probe.fields, answers }),
+          appliedAt: new Date(),
+          progressMessage: `Submitted! (${fieldsFilled} field${fieldsFilled === 1 ? "" : "s"} filled)`,
+          logs: JSON.stringify(stepLogs),
+        },
+      });
+      push("Application submitted");
+    } else {
+      const reason =
+        probe.fields.length === 0
+          ? "No application form detected on this page — the listing likely redirects to an external ATS behind an 'Apply' button. Open the job link and apply manually, or paste the direct ATS URL."
+          : fieldsFilled === 0
+            ? "Form fields were detected but none could be filled (likely all low-confidence or unsupported types). Review the snapshot and apply manually."
+            : `Form filled (${fieldsFilled} field${fieldsFilled === 1 ? "" : "s"}) but no submit button was clicked (last action: ${lastClickResult}). Review and submit manually.`;
+      await prisma.application.update({
+        where: { id: applicationId },
+        data: {
+          status: "NEEDS_INFO",
+          matchScore: score.score,
+          coverLetter: cover,
+          formSnapshot: JSON.stringify({ fields: probe.fields, answers }),
+          progressMessage: reason,
+          errorMessage: reason,
+          logs: JSON.stringify(stepLogs),
+        },
+      });
+      push("Application needs manual completion", { reason });
+    }
     await ctx.close();
   } catch (err: any) {
     const msg = String(err?.message ?? err);
