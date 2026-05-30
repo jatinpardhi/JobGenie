@@ -68,17 +68,32 @@ export async function enqueueSearch(data: { searchId: string; userId: string }) 
   ]);
   setImmediate(async () => {
     const started = Date.now();
+    const setProgress = async (msg: string) => {
+      try {
+        await prisma.jobSearch.update({
+          where: { id: data.searchId },
+          data: { lastProgress: msg.slice(0, 200) },
+        });
+      } catch { /* row may have been deleted */ }
+    };
     try {
       const search = await prisma.jobSearch.findUniqueOrThrow({ where: { id: data.searchId } });
       await prisma.jobSearch.update({
         where: { id: search.id },
-        data: { lastStatus: "RUNNING", lastRunAt: new Date(), lastError: null },
+        data: {
+          lastStatus: "RUNNING",
+          lastRunAt: new Date(),
+          lastError: null,
+          lastProgress: "Starting…",
+        },
       });
       const jobs = await discoverJobs({
         portalUrl: search.portalUrl,
         keywords: search.keywords,
         filters: search.filters ? JSON.parse(search.filters) : undefined,
+        onProgress: setProgress,
       });
+      await setProgress(`Queuing ${jobs.length} application${jobs.length === 1 ? "" : "s"}…`);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const todayCount = await prisma.application.count({
@@ -114,6 +129,10 @@ export async function enqueueSearch(data: { searchId: string; userId: string }) 
             jobs.length === 0
               ? "No job links found on the page. The portal may block bots, require login, or render results in JS that didn't load. Try a Greenhouse/Lever/Workday link."
               : null,
+          lastProgress:
+            jobs.length === 0
+              ? "Finished — 0 jobs found."
+              : `Finished — queued ${created} new application${created === 1 ? "" : "s"} from ${jobs.length} link${jobs.length === 1 ? "" : "s"}.`,
           lastRunAt: new Date(),
         },
       });
@@ -127,6 +146,7 @@ export async function enqueueSearch(data: { searchId: string; userId: string }) 
           data: {
             lastStatus: "ERROR",
             lastError: msg.slice(0, 500),
+            lastProgress: "Failed.",
             lastRunAt: new Date(),
           },
         });

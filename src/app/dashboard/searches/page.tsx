@@ -11,6 +11,7 @@ type Search = {
   lastJobCount?: number | null;
   lastStatus?: string | null;
   lastError?: string | null;
+  lastProgress?: string | null;
 };
 
 export default function SearchesPage() {
@@ -115,7 +116,14 @@ export default function SearchesPage() {
                 <tr key={s.id} className="border-t border-slate-200 dark:border-slate-800">
                   <td className="p-3 truncate max-w-xs">{s.portalUrl}</td>
                   <td className="p-3">{s.keywords}</td>
-                  <td className="p-3">{statusBadge(s)}</td>
+                  <td className="p-3">
+                    {statusBadge(s)}
+                    {s.lastProgress && (
+                      <div className="mt-1 text-xs text-slate-500 max-w-[18rem] truncate" title={s.lastProgress}>
+                        {s.lastProgress}
+                      </div>
+                    )}
+                  </td>
                   <td className="p-3">{s.lastJobCount ?? "—"}</td>
                   <td className="p-3 text-slate-500">{s.lastRunAt ? new Date(s.lastRunAt).toLocaleString() : "—"}</td>
                   <td className="p-3 text-right">

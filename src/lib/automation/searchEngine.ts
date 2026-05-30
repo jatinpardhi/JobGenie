@@ -16,6 +16,7 @@ export interface SearchInput {
     type?: "fulltime" | "internship" | "contract";
   };
   limit?: number;
+  onProgress?: (msg: string) => void | Promise<void>;
 }
 
 export interface DiscoveredJob {
@@ -31,20 +32,31 @@ export interface DiscoveredJob {
  * outbound links that look like job postings.
  */
 export async function discoverJobs(input: SearchInput): Promise<DiscoveredJob[]> {
+  const progress = async (msg: string) => {
+    log.info(msg);
+    try { await input.onProgress?.(msg); } catch { /* ignore */ }
+  };
+  await progress("Launching headless browser…");
   const ctx = await newContext();
   const page = await ctx.newPage();
   try {
+    await progress(`Opening ${new URL(input.portalUrl).host}…`);
     await page.goto(input.portalUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
     const platform = detectPlatform(input.portalUrl);
-    log.info("Searching", { platform, keywords: input.keywords });
+    await progress(`Loaded (${platform}). Looking for a search box…`);
 
     const search = await findSearchInput(page);
     if (search) {
+      await progress(`Typing keywords: "${input.keywords}"…`);
       await search.fill(input.keywords).catch(() => {});
       await page.keyboard.press("Enter").catch(() => {});
+      await progress("Waiting for results to load…");
       await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    } else {
+      await progress("No search box found — scanning page links directly.");
     }
 
+    await progress("Extracting job links from the page…");
     const limit = input.limit ?? 25;
     const jobs: DiscoveredJob[] = await page.evaluate((max) => {
       const seen = new Set<string>();
@@ -65,7 +77,7 @@ export async function discoverJobs(input: SearchInput): Promise<DiscoveredJob[]>
       return out;
     }, limit);
 
-    log.info("Discovered jobs", { count: jobs.length });
+    await progress(`Found ${jobs.length} candidate job link${jobs.length === 1 ? "" : "s"}.`);
     return jobs;
   } finally {
     await ctx.close();

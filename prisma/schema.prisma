@@ -105,6 +105,7 @@ model JobSearch {
   lastJobCount  Int?
   lastStatus    String?  // RUNNING | OK | ERROR
   lastError     String?
+  lastProgress  String?  // human-readable current-step label
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   applications  Application[]
 }
