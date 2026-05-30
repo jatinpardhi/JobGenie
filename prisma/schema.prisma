@@ -93,16 +93,20 @@ model SavedAnswer {
 }
 
 model JobSearch {
-  id           String   @id @default(cuid())
-  userId       String
-  portalUrl    String
-  keywords     String
-  filters      String?  // JSON blob: location, workMode, experience, salary, type
-  schedule     String?  // cron expression for scheduled runs
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  applications Application[]
+  id            String   @id @default(cuid())
+  userId        String
+  portalUrl     String
+  keywords      String
+  filters       String?  // JSON blob: location, workMode, experience, salary, type
+  schedule      String?  // cron expression for scheduled runs
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  lastRunAt     DateTime?
+  lastJobCount  Int?
+  lastStatus    String?  // RUNNING | OK | ERROR
+  lastError     String?
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  applications  Application[]
 }
 
 model Application {

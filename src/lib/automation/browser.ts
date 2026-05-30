@@ -6,7 +6,14 @@ let browser: Browser | null = null;
 
 export async function getBrowser(): Promise<Browser> {
   if (browser) return browser;
-  browser = await chromium.launch({ headless: env.headless });
+  browser = await chromium.launch({
+    headless: env.headless,
+    args: [
+      "--disable-blink-features=AutomationControlled",
+      "--disable-features=IsolateOrigins,site-per-process",
+      "--no-sandbox",
+    ],
+  });
   return browser;
 }
 
