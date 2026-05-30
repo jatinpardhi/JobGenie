@@ -14,17 +14,19 @@ An AI-powered web app that automatically applies to jobs across **any** career p
 
 ## Architecture
 
+See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for full diagrams (system overview, apply sequence, queue modes, deployment topologies).
+
 ```
 Next.js (App Router)
   ├── /api/*          REST endpoints (auth, profile, resumes, searches, applications, answers, portal/inspect)
   ├── /dashboard/*    SaaS dashboard UI (Tailwind, dark mode)
   └── lib/
-       ├── ai/        OpenAI agent (field mapper, cover letter, match scorer, question synth)
+       ├── ai/        OpenAI-compatible agent (field mapper, cover letter, match scorer, question synth)
        ├── automation/ Playwright engine (browser, inspector, filler, applyEngine, searchEngine)
        ├── db.ts      Prisma client
-       └── queue.ts   BullMQ queues
-worker/                Long-running BullMQ worker — runs Playwright jobs
-prisma/schema.prisma   PostgreSQL schema
+       └── queue.ts   BullMQ queues with inline fallback
+worker/                Long-running BullMQ worker — runs Playwright jobs (Redis mode only)
+prisma/schema.prisma   SQLite schema (default) — swap to Postgres by changing the datasource
 ```
 
 ## Quick start (local)
