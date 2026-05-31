@@ -164,6 +164,54 @@ export async function runApplication(input: ApplyJobInput) {
       }
     }
 
+    // --- Portal profile: merge all detected questions (not just unanswered
+    // ones) into a per-portal catalogue so the dashboard can prompt the
+    // user to fill them once. Mark complete when no required questions are
+    // pending. Existing saved answers automatically populate via the same
+    // SavedAnswer pathway above.
+    if (probe.detectedPlatform && probe.detectedPlatform !== "generic") {
+      try {
+        const existingProfile = await prisma.portalProfile.findUnique({
+          where: { userId_portal: { userId, portal: probe.detectedPlatform } },
+        });
+        let merged = probe.fields
+          .filter((f) => f.type !== "file")
+          .map((f) => ({
+            fieldId: f.fieldId,
+            label: f.label,
+            type: f.type,
+            required: f.required,
+            options: f.options,
+            placeholder: f.placeholder,
+          }));
+        if (existingProfile) {
+          try {
+            const prev = JSON.parse(existingProfile.questions) as typeof merged;
+            const byLabel = new Map(merged.map((q) => [q.label, q]));
+            for (const q of prev) if (!byLabel.has(q.label)) merged.push(q);
+          } catch { /* ignore parse */ }
+        }
+        const completed = pendingQuestions.filter((q) => q.required).length === 0;
+        await prisma.portalProfile.upsert({
+          where: { userId_portal: { userId, portal: probe.detectedPlatform } },
+          create: {
+            userId,
+            portal: probe.detectedPlatform,
+            questions: JSON.stringify(merged),
+            sampleUrl: jobUrl,
+            completed,
+          },
+          update: {
+            questions: JSON.stringify(merged),
+            sampleUrl: existingProfile?.sampleUrl ?? jobUrl,
+            completed,
+          },
+        });
+      } catch (e) {
+        log.warn("Portal profile upsert failed", { err: String((e as any)?.message ?? e) });
+      }
+    }
+
     if (env.humanApproval && !input.bypassApproval) {
       const msg =
         pendingQuestions.length > 0

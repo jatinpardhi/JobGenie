@@ -38,9 +38,41 @@ export async function fillForm(
         await handle.selectOption({ label: String(a.value) }).catch(async () => {
           await handle.selectOption(String(a.value));
         });
-      } else if (type === "checkbox" || type === "radio") {
-        if (a.value === true || /^(yes|true|1)$/i.test(String(a.value))) {
-          await handle.check({ force: true });
+      } else if (type === "radio" || type === "checkbox") {
+        // For grouped radio/checkbox controls, every peer shares the same
+        // data-jobgenie-id. Pick the peer whose visible label or value
+        // matches the answer; fall back to the single-handle behavior.
+        const peers = await target.$$(selector);
+        if (peers.length > 1) {
+          const want = String(a.value).toLowerCase().trim();
+          let matched = false;
+          for (const p of peers) {
+            const meta = await p.evaluate((el) => {
+              const input = el as HTMLInputElement;
+              const id = input.getAttribute("id") || "";
+              const lblFor = id
+                ? document.querySelector(`label[for="${id.replace(/"/g, '\\"')}"]`)?.textContent?.trim()
+                : null;
+              const wrap = input.closest("label")?.textContent?.trim();
+              return { value: input.value || "", label: lblFor || wrap || "" };
+            });
+            const label = (meta.label || "").toLowerCase().trim();
+            const value = (meta.value || "").toLowerCase().trim();
+            if (label === want || value === want || (label && label.includes(want)) || (value && value.includes(want))) {
+              await p.check({ force: true }).catch(() => {});
+              matched = true;
+              break;
+            }
+          }
+          if (!matched && type === "checkbox" && /^(yes|true|1)$/i.test(String(a.value))) {
+            await peers[0].check({ force: true }).catch(() => {});
+            matched = true;
+          }
+          if (!matched) { skipped++; continue; }
+        } else {
+          if (a.value === true || /^(yes|true|1)$/i.test(String(a.value))) {
+            await handle.check({ force: true });
+          }
         }
       } else if (tag === "textarea" || tag === "input") {
         await handle.scrollIntoViewIfNeeded().catch(() => {});

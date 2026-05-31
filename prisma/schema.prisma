@@ -24,6 +24,7 @@ model User {
   applications  Application[]
   accounts      OAuthAccount[]
   sessions      Session[]
+  portalProfiles PortalProfile[]
 }
 
 model OAuthAccount {
@@ -138,3 +139,22 @@ model Application {
 
 // ApplicationStatus values (SQLite has no enums):
 // PENDING, AWAITING_APPROVAL, RUNNING, SUBMITTED, FAILED, SKIPPED, NEEDS_INFO
+
+/// One-time per-portal question catalogue. When the apply engine
+/// probes a portal it merges any discovered questions into the user's
+/// PortalProfile so the dashboard can prompt the user once and reuse
+/// those answers for every future job on that portal.
+model PortalProfile {
+  id          String   @id @default(cuid())
+  userId      String
+  portal      String   // platform key from detectPlatform (greenhouse, lever, ...)
+  questions   String   // JSON array: [{fieldId,label,type,options?,required?,placeholder?}]
+  sampleUrl   String?  // a job URL we learned the questions from
+  completed   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, portal])
+  @@index([userId, completed])
+}

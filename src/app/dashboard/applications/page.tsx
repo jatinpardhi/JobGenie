@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { QuestionsForm } from "../_components/QuestionsForm";
 
 type App = {
   id: string;
@@ -74,11 +76,18 @@ export default function ApplicationsPage() {
   const [showLog, setShowLog] = useState(false);
   const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>({});
   const [savingAnswers, setSavingAnswers] = useState(false);
+  const [portals, setPortals] = useState<
+    Array<{ id: string; portal: string; completed: boolean; pendingRequired: number; questionCount: number }>
+  >([]);
 
   async function load() {
     try {
       const r = await fetch("/api/applications");
       if (r.ok) setApps(await r.json());
+    } catch {}
+    try {
+      const r2 = await fetch("/api/portal-profiles");
+      if (r2.ok) setPortals(await r2.json());
     } catch {}
   }
   useEffect(() => {
@@ -164,6 +173,34 @@ export default function ApplicationsPage() {
           <h1 className="text-2xl font-bold">Applications</h1>
           <span className="text-xs text-slate-500">{apps.length} total · auto-refresh 3s</span>
         </div>
+
+        {/* Portal-attention banner — surfaces portals where the user needs
+            to fill standard questions once so future apps auto-fill. */}
+        {portals.some((p) => !p.completed) && (
+          <Link
+            href="/dashboard/portals"
+            className="mt-3 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-950/70"
+          >
+            <span className="mt-0.5 text-amber-600 dark:text-amber-400">⚠</span>
+            <span className="min-w-0 flex-1">
+              <span className="font-semibold">
+                {portals.filter((p) => !p.completed).length} portal
+                {portals.filter((p) => !p.completed).length === 1 ? "" : "s"} need setup
+              </span>
+              <span className="ml-1 opacity-80">
+                — fill standard questions once for{" "}
+                {portals
+                  .filter((p) => !p.completed)
+                  .slice(0, 3)
+                  .map((p) => p.portal)
+                  .join(", ")}
+                {portals.filter((p) => !p.completed).length > 3 ? "…" : ""}
+                {" "}so every future job on those portals auto-fills.
+              </span>
+            </span>
+            <span className="shrink-0 underline">Open Portals →</span>
+          </Link>
+        )}
 
         <div className="mt-3 flex flex-wrap gap-1.5">
           {filterChips.map((f) => {
@@ -358,49 +395,11 @@ export default function ApplicationsPage() {
                   </div>
                 </div>
                 <div className="space-y-3 px-3 py-3">
-                  {pending.map((q) => {
-                    const val = draftAnswers[q.fieldId] ?? "";
-                    const label = q.label || q.fieldId;
-                    const opts = Array.isArray(q.options) ? q.options.filter(Boolean) : [];
-                    const isLong = /textarea/i.test(q.type) || label.length > 80;
-                    return (
-                      <div key={q.fieldId} className="space-y-1">
-                        <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
-                          {label}
-                          {q.required && <span className="ml-1 text-red-500">*</span>}
-                          <span className="ml-2 text-[10px] font-normal text-slate-400">{q.type}</span>
-                        </label>
-                        {opts.length > 0 && opts.length <= 12 ? (
-                          <select
-                            className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900"
-                            value={val}
-                            onChange={(e) => setDraftAnswers((d) => ({ ...d, [q.fieldId]: e.target.value }))}
-                          >
-                            <option value="">— select —</option>
-                            {opts.map((o) => (
-                              <option key={o} value={o}>{o}</option>
-                            ))}
-                          </select>
-                        ) : isLong ? (
-                          <textarea
-                            className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900"
-                            rows={3}
-                            placeholder={q.placeholder || ""}
-                            value={val}
-                            onChange={(e) => setDraftAnswers((d) => ({ ...d, [q.fieldId]: e.target.value }))}
-                          />
-                        ) : (
-                          <input
-                            type={q.type === "email" ? "email" : q.type === "tel" ? "tel" : "text"}
-                            className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900"
-                            placeholder={q.placeholder || ""}
-                            value={val}
-                            onChange={(e) => setDraftAnswers((d) => ({ ...d, [q.fieldId]: e.target.value }))}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
+                  <QuestionsForm
+                    questions={pending}
+                    values={draftAnswers}
+                    onChange={(k, v) => setDraftAnswers((d) => ({ ...d, [k]: v }))}
+                  />
                   <div className="flex items-center justify-between pt-1">
                     <span className="text-[11px] text-slate-500">
                       Your answers are saved and reused for similar future questions.

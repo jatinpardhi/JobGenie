@@ -26,8 +26,44 @@ export async function detectFormFields(target: FormTarget): Promise<DetectedFiel
       return name ?? el.tagName.toLowerCase();
     }
 
+    function groupLabelFor(el: HTMLElement): string {
+      // Prefer a parent fieldset's legend, then the closest label-like
+      // ancestor's heading text. Falls back to labelFor.
+      const fs = el.closest("fieldset");
+      const legend = fs?.querySelector(":scope > legend")?.textContent?.trim();
+      if (legend) return legend;
+      // Walk up looking for a sibling .label / heading or aria-labelledby on a wrapper.
+      let cur: HTMLElement | null = el.parentElement;
+      for (let i = 0; cur && i < 6; i++) {
+        const labelled = cur.getAttribute("aria-labelledby");
+        if (labelled) {
+          const ref = document.getElementById(labelled);
+          if (ref?.textContent) return ref.textContent.trim();
+        }
+        const heading = cur.querySelector(":scope > label, :scope > .label, :scope > h2, :scope > h3, :scope > h4, :scope > div > label");
+        if (heading?.textContent) {
+          const t = heading.textContent.trim();
+          if (t.length > 0 && t.length < 200) return t;
+        }
+        cur = cur.parentElement;
+      }
+      return labelFor(el);
+    }
+
+    function optionLabelFor(input: HTMLInputElement): string {
+      const id = input.getAttribute("id");
+      if (id) {
+        const lbl = document.querySelector(`label[for="${CSS.escape(id)}"]`);
+        if (lbl?.textContent) return lbl.textContent.trim();
+      }
+      const wrap = input.closest("label");
+      if (wrap?.textContent) return wrap.textContent.trim();
+      return input.value || "";
+    }
+
     const fields: any[] = [];
     let idx = 0;
+    const handledGroups = new Set<string>();
     const inputs = Array.from(
       document.querySelectorAll<HTMLElement>(
         "input, select, textarea, [role=combobox], [contenteditable=true]"
@@ -39,6 +75,36 @@ export async function detectFormFields(target: FormTarget): Promise<DetectedFiel
       if (["hidden", "submit", "button", "image", "reset"].includes(typeAttr)) continue;
       const rect = el.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) continue;
+
+      // --- Radio / checkbox group detection ---
+      if ((typeAttr === "radio" || typeAttr === "checkbox") && el.getAttribute("name")) {
+        const name = (el as HTMLInputElement).name;
+        const groupKey = `${typeAttr}:${name}`;
+        if (handledGroups.has(groupKey)) continue;
+        const peers = Array.from(
+          document.querySelectorAll<HTMLInputElement>(
+            `input[type="${typeAttr}"][name="${CSS.escape(name)}"]`
+          )
+        );
+        if (peers.length > 1) {
+          handledGroups.add(groupKey);
+          const options = peers.map(optionLabelFor).map((s) => s.slice(0, 120)).filter(Boolean);
+          const required = peers.some(
+            (p) => p.hasAttribute("required") || p.getAttribute("aria-required") === "true"
+          );
+          const fieldId = `f_${idx++}`;
+          peers.forEach((p) => p.setAttribute("data-jobgenie-id", fieldId));
+          fields.push({
+            fieldId,
+            label: groupLabelFor(el).slice(0, 200),
+            type: typeAttr === "radio" ? "radio-group" : "checkbox-group",
+            required,
+            options,
+          });
+          continue;
+        }
+        // single radio/checkbox falls through to default handling
+      }
 
       let type = tag;
       if (tag === "input") type = typeAttr || "text";
