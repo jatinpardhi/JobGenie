@@ -1,15 +1,14 @@
-import type { Page } from "playwright";
 import type { MappedAnswer } from "../ai/agent";
-import { humanType } from "./browser";
+import type { FormTarget } from "./inspector";
 import { jitter } from "../hash";
 
 /**
  * Apply the AI-mapped answers back into the live form. Uses the
  * `data-jobgenie-id` attribute that the inspector stamped onto each
- * detected control, so it is portal-agnostic.
+ * detected control. Works against either a Page or an iframe Frame.
  */
 export async function fillForm(
-  page: Page,
+  target: FormTarget,
   answers: MappedAnswer[],
   resumePath?: string
 ): Promise<{ filled: number; skipped: number }> {
@@ -17,12 +16,12 @@ export async function fillForm(
   let skipped = 0;
 
   for (const a of answers) {
-    if (a.value === null || a.value === undefined) {
+    if (a.value === null || a.value === undefined || a.value === "") {
       skipped++;
       continue;
     }
     const selector = `[data-jobgenie-id="${a.fieldId}"]`;
-    const handle = await page.$(selector);
+    const handle = await target.$(selector);
     if (!handle) {
       skipped++;
       continue;
@@ -44,8 +43,9 @@ export async function fillForm(
           await handle.check({ force: true });
         }
       } else if (tag === "textarea" || tag === "input") {
-        await handle.fill("");
-        await humanType(page, selector, String(a.value));
+        await handle.scrollIntoViewIfNeeded().catch(() => {});
+        await handle.fill("").catch(() => {});
+        await handle.type(String(a.value), { delay: 20 + Math.floor(Math.random() * 40) });
       } else {
         await handle.evaluate((el, v) => {
           (el as HTMLElement).innerText = String(v);
@@ -64,11 +64,13 @@ export async function fillForm(
  * Attempt to advance multi-step forms or submit. Looks for buttons by
  * accessible name rather than fixed selectors.
  */
-export async function clickNextOrSubmit(page: Page): Promise<"next" | "submit" | "none"> {
+export async function clickNextOrSubmit(
+  target: FormTarget
+): Promise<"next" | "submit" | "none"> {
   const submitNames = [/^submit application$/i, /^submit$/i, /^apply$/i];
   const nextNames = [/^next$/i, /continue/i, /^review$/i];
 
-  const buttons = await page.$$("button, input[type=submit], [role=button], a");
+  const buttons = await target.$$("button, input[type=submit], [role=button], a");
   for (const re of submitNames) {
     for (const b of buttons) {
       const txt = ((await b.textContent()) || (await b.getAttribute("value")) || "").trim();

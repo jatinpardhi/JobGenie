@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     const ctx = await newContext();
     const page = await ctx.newPage();
     try {
-      const probe = await probePortal(page, parsed.data.url);
+      const { probe } = await probePortal(page, parsed.data.url);
       const profile = await prisma.profile.findUnique({ where: { userId } });
       const unknown = probe.fields.filter((f) => f.required);
       const questions = await synthesizeQuestions(unknown, profile ?? {});

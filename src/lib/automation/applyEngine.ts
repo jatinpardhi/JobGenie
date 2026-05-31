@@ -47,7 +47,7 @@ export async function runApplication(input: ApplyJobInput) {
     });
     const resume = user.resumes.find((r) => r.isDefault) ?? user.resumes[0];
     if (!resume) throw new Error("No resume on file — upload one in Profile first.");
-    await progress(`Profile loaded (resume: ${resume.fileName ?? "uploaded"}, saved answers: ${user.answers.length}).`);
+    await progress(`Profile loaded (resume: ${resume.label ?? "uploaded"}, saved answers: ${user.answers.length}).`);
 
     const savedAnswers = Object.fromEntries(
       user.answers.map((a) => [a.questionText, a.answer])
@@ -57,7 +57,10 @@ export async function runApplication(input: ApplyJobInput) {
     const ctx = await newContext();
     const page = await ctx.newPage();
     await progress(`Opening job page: ${jobUrl}`);
-    const probe = await probePortal(page, jobUrl);
+    const { probe, target, activePage } = await probePortal(page, jobUrl);
+    if (probe.ctaClicked) {
+      await progress(`Clicked Apply CTA → ${probe.finalUrl}`);
+    }
     await progress(
       `Probe complete — platform=${probe.detectedPlatform}, login=${probe.requiresLogin}, captcha=${probe.hasCaptcha}, fields=${probe.fields.length}.`
     );
@@ -123,7 +126,23 @@ export async function runApplication(input: ApplyJobInput) {
       resume.parsedText ?? "",
       savedAnswers
     );
-    await progress(`Mapped ${answers.length} answer${answers.length === 1 ? "" : "s"}.`);
+    // Identify fields the engine could NOT confidently answer — these
+    // become the interactive Q&A list shown to the user in the UI.
+    const answeredIds = new Set(
+      answers.filter((a) => a.value !== null && a.value !== undefined && a.value !== "" && a.confidence >= 0.7).map((a) => a.fieldId)
+    );
+    const pendingQuestions = probe.fields
+      .filter((f) => !answeredIds.has(f.fieldId))
+      .filter((f) => f.type !== "file")
+      .map((f) => ({
+        fieldId: f.fieldId,
+        label: f.label,
+        type: f.type,
+        required: f.required,
+        options: f.options,
+        placeholder: f.placeholder,
+      }));
+    await progress(`Mapped ${answers.length} answer${answers.length === 1 ? "" : "s"}; ${pendingQuestions.length} need your input.`);
 
     for (const a of answers) {
       if (a.value && a.confidence >= 0.7) {
@@ -146,14 +165,24 @@ export async function runApplication(input: ApplyJobInput) {
     }
 
     if (env.humanApproval && !input.bypassApproval) {
+      const msg =
+        pendingQuestions.length > 0
+          ? `Need your input on ${pendingQuestions.length} question${pendingQuestions.length === 1 ? "" : "s"} before submitting.`
+          : "Ready for review — click Approve & submit to send.";
       await prisma.application.update({
         where: { id: applicationId },
         data: {
           status: "AWAITING_APPROVAL",
           matchScore: score.score,
           coverLetter: cover,
-          formSnapshot: JSON.stringify({ fields: probe.fields, answers }),
-          progressMessage: "Ready for review — click Approve & submit to send.",
+          formSnapshot: JSON.stringify({
+            fields: probe.fields,
+            answers,
+            pendingQuestions,
+            ctaClicked: probe.ctaClicked,
+            finalUrl: probe.finalUrl,
+          }),
+          progressMessage: msg,
           logs: JSON.stringify(stepLogs),
         },
       });
@@ -163,14 +192,14 @@ export async function runApplication(input: ApplyJobInput) {
     }
 
     await progress("Filling form fields in the live page…");
-    const filled = await fillForm(page, answers, resume.filePath);
+    const filled = await fillForm(target, answers, resume.filePath);
     await progress(`Filled ${filled?.filled ?? "?"} field${filled?.filled === 1 ? "" : "s"}.`);
 
     let submitClicked = false;
     let lastClickResult: string = "none";
     for (let i = 0; i < 5; i++) {
       await progress(`Step ${i + 1}: clicking Next/Submit…`);
-      const result = await clickNextOrSubmit(page);
+      const result = await clickNextOrSubmit(target);
       push("Step click", { step: i, result });
       lastClickResult = result;
       if (result === "submit") {
@@ -182,7 +211,7 @@ export async function runApplication(input: ApplyJobInput) {
         await progress("No further button found.");
         break;
       }
-      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await activePage.waitForLoadState("domcontentloaded").catch(() => {});
     }
 
     // Honest terminal state:
@@ -201,7 +230,13 @@ export async function runApplication(input: ApplyJobInput) {
           status: "SUBMITTED",
           matchScore: score.score,
           coverLetter: cover,
-          formSnapshot: JSON.stringify({ fields: probe.fields, answers }),
+          formSnapshot: JSON.stringify({
+            fields: probe.fields,
+            answers,
+            pendingQuestions: [],
+            ctaClicked: probe.ctaClicked,
+            finalUrl: probe.finalUrl,
+          }),
           appliedAt: new Date(),
           progressMessage: `Submitted! (${fieldsFilled} field${fieldsFilled === 1 ? "" : "s"} filled)`,
           logs: JSON.stringify(stepLogs),
@@ -211,9 +246,11 @@ export async function runApplication(input: ApplyJobInput) {
     } else {
       const reason =
         probe.fields.length === 0
-          ? "No application form detected on this page — the listing likely redirects to an external ATS behind an 'Apply' button. Open the job link and apply manually, or paste the direct ATS URL."
+          ? probe.ctaClicked
+            ? "Clicked the Apply CTA but no form fields appeared — the destination may require login, a CAPTCHA, or render the form in a cross-origin iframe we can't inspect. Open the link and apply manually."
+            : "No application form detected on this page and no 'Apply' CTA was found — open the listing manually and use the ATS link."
           : fieldsFilled === 0
-            ? "Form fields were detected but none could be filled (likely all low-confidence or unsupported types). Review the snapshot and apply manually."
+            ? "Form fields were detected but none could be filled. Use the questions below to provide answers, then click Approve & submit."
             : `Form filled (${fieldsFilled} field${fieldsFilled === 1 ? "" : "s"}) but no submit button was clicked (last action: ${lastClickResult}). Review and submit manually.`;
       await prisma.application.update({
         where: { id: applicationId },
@@ -221,7 +258,13 @@ export async function runApplication(input: ApplyJobInput) {
           status: "NEEDS_INFO",
           matchScore: score.score,
           coverLetter: cover,
-          formSnapshot: JSON.stringify({ fields: probe.fields, answers }),
+          formSnapshot: JSON.stringify({
+            fields: probe.fields,
+            answers,
+            pendingQuestions,
+            ctaClicked: probe.ctaClicked,
+            finalUrl: probe.finalUrl,
+          }),
           progressMessage: reason,
           errorMessage: reason,
           logs: JSON.stringify(stepLogs),

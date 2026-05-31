@@ -12,8 +12,18 @@ type App = {
   errorMessage: string | null;
   progressMessage: string | null;
   logs: string | null;
+  formSnapshot: string | null;
   createdAt: string;
   appliedAt: string | null;
+};
+
+type PendingQuestion = {
+  fieldId: string;
+  label: string;
+  type: string;
+  required?: boolean;
+  options?: string[];
+  placeholder?: string;
 };
 
 type StatusKey =
@@ -62,6 +72,8 @@ export default function ApplicationsPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [filter, setFilter] = useState<StatusKey>("ALL");
   const [showLog, setShowLog] = useState(false);
+  const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>({});
+  const [savingAnswers, setSavingAnswers] = useState(false);
 
   async function load() {
     try {
@@ -76,6 +88,28 @@ export default function ApplicationsPage() {
   }, []);
 
   const selected = apps.find((a) => a.id === selectedId) ?? null;
+
+  // Reset draft answers when switching apps.
+  useEffect(() => {
+    setDraftAnswers({});
+  }, [selectedId]);
+
+  const snapshot = useMemo<{ pendingQuestions: PendingQuestion[]; ctaClicked?: boolean; finalUrl?: string } | null>(() => {
+    if (!selected?.formSnapshot) return null;
+    try {
+      const s = JSON.parse(selected.formSnapshot);
+      return {
+        pendingQuestions: Array.isArray(s.pendingQuestions) ? s.pendingQuestions : [],
+        ctaClicked: s.ctaClicked,
+        finalUrl: s.finalUrl,
+      };
+    } catch {
+      return null;
+    }
+  }, [selected?.formSnapshot]);
+
+  const pending = snapshot?.pendingQuestions ?? [];
+  const showQA = pending.length > 0 && (selected?.status === "AWAITING_APPROVAL" || selected?.status === "NEEDS_INFO");
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { ALL: apps.length };
@@ -97,6 +131,20 @@ export default function ApplicationsPage() {
     setBusyId(id);
     try { await fetch(`/api/applications/${id}/approve`, { method: "POST" }); }
     finally { setBusyId(null); load(); }
+  }
+  async function saveAnswers(id: string) {
+    setSavingAnswers(true);
+    try {
+      await fetch(`/api/applications/${id}/answers`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ answers: draftAnswers }),
+      });
+      setDraftAnswers({});
+    } finally {
+      setSavingAnswers(false);
+      load();
+    }
   }
 
   const filterChips: { key: StatusKey; label: string }[] = [
@@ -230,10 +278,15 @@ export default function ApplicationsPage() {
               {selected.status === "AWAITING_APPROVAL" && (
                 <button
                   className="btn-primary disabled:opacity-50"
-                  disabled={busyId === selected.id}
+                  disabled={busyId === selected.id || pending.length > 0}
                   onClick={() => approve(selected.id)}
+                  title={pending.length > 0 ? "Answer the pending questions below first" : undefined}
                 >
-                  {busyId === selected.id ? "Submitting…" : "Approve & submit"}
+                  {busyId === selected.id
+                    ? "Submitting…"
+                    : pending.length > 0
+                      ? `Answer ${pending.length} question${pending.length === 1 ? "" : "s"} first`
+                      : "Approve & submit"}
                 </button>
               )}
               {(selected.status === "FAILED" ||
@@ -289,6 +342,81 @@ export default function ApplicationsPage() {
                   {selected.status === "NEEDS_INFO" ? "Manual action required" : "Error"}
                 </div>
                 <div className="mt-0.5 whitespace-pre-wrap break-words">{selected.errorMessage}</div>
+              </div>
+            )}
+
+            {/* Pending questions — interactive Q&A */}
+            {showQA && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50/40 dark:border-amber-900 dark:bg-amber-950/20">
+                <div className="border-b border-amber-200 px-3 py-2 dark:border-amber-900">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                    Questions for you
+                  </div>
+                  <div className="mt-0.5 text-sm text-slate-700 dark:text-slate-200">
+                    {pending.length} field{pending.length === 1 ? "" : "s"} on the application form need your input
+                    {snapshot?.ctaClicked ? " (form opened by clicking Apply Now)" : ""}.
+                  </div>
+                </div>
+                <div className="space-y-3 px-3 py-3">
+                  {pending.map((q) => {
+                    const val = draftAnswers[q.fieldId] ?? "";
+                    const label = q.label || q.fieldId;
+                    const opts = Array.isArray(q.options) ? q.options.filter(Boolean) : [];
+                    const isLong = /textarea/i.test(q.type) || label.length > 80;
+                    return (
+                      <div key={q.fieldId} className="space-y-1">
+                        <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                          {label}
+                          {q.required && <span className="ml-1 text-red-500">*</span>}
+                          <span className="ml-2 text-[10px] font-normal text-slate-400">{q.type}</span>
+                        </label>
+                        {opts.length > 0 && opts.length <= 12 ? (
+                          <select
+                            className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900"
+                            value={val}
+                            onChange={(e) => setDraftAnswers((d) => ({ ...d, [q.fieldId]: e.target.value }))}
+                          >
+                            <option value="">— select —</option>
+                            {opts.map((o) => (
+                              <option key={o} value={o}>{o}</option>
+                            ))}
+                          </select>
+                        ) : isLong ? (
+                          <textarea
+                            className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900"
+                            rows={3}
+                            placeholder={q.placeholder || ""}
+                            value={val}
+                            onChange={(e) => setDraftAnswers((d) => ({ ...d, [q.fieldId]: e.target.value }))}
+                          />
+                        ) : (
+                          <input
+                            type={q.type === "email" ? "email" : q.type === "tel" ? "tel" : "text"}
+                            className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900"
+                            placeholder={q.placeholder || ""}
+                            value={val}
+                            onChange={(e) => setDraftAnswers((d) => ({ ...d, [q.fieldId]: e.target.value }))}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[11px] text-slate-500">
+                      Your answers are saved and reused for similar future questions.
+                    </span>
+                    <button
+                      className="btn-primary disabled:opacity-50"
+                      disabled={
+                        savingAnswers ||
+                        Object.values(draftAnswers).every((v) => !v || !v.trim())
+                      }
+                      onClick={() => saveAnswers(selected.id)}
+                    >
+                      {savingAnswers ? "Saving…" : "Save answers"}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
