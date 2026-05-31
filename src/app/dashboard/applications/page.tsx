@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { QuestionsForm } from "../_components/QuestionsForm";
 
@@ -69,10 +70,12 @@ function timeAgo(iso: string): string {
 }
 
 export default function ApplicationsPage() {
+  const sp = useSearchParams();
+  const initialFilter = (sp.get("status") as StatusKey) || "ALL";
   const [apps, setApps] = useState<App[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<StatusKey>("ALL");
+  const [filter, setFilter] = useState<StatusKey>(initialFilter);
   const [showLog, setShowLog] = useState(false);
   const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>({});
   const [savingAnswers, setSavingAnswers] = useState(false);
