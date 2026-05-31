@@ -80,7 +80,10 @@ export function RecentApplications({ initialTotal }: { initialTotal: number }) {
         </div>
       </div>
       <div className="card mt-3 overflow-hidden p-0">
-        <div ref={scrollRef} className="max-h-[520px] overflow-y-auto">
+        <div
+          ref={scrollRef}
+          className="max-h-[70vh] min-h-[520px] overflow-y-auto [scrollbar-color:theme(colors.slate.400)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 hover:[&::-webkit-scrollbar-thumb]:bg-slate-400 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-track]:bg-transparent"
+        >
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs uppercase text-slate-500 dark:bg-slate-900">
             <tr>
