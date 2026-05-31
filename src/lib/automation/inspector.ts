@@ -10,6 +10,20 @@ export type FormTarget = Page | Frame;
  */
 export async function detectFormFields(target: FormTarget): Promise<DetectedField[]> {
   return target.evaluate(() => {
+    function textOf(node: Element | null): string {
+      if (!node) return "";
+      const t = (node.textContent || "").replace(/\s+/g, " ").trim();
+      return t;
+    }
+
+    function looksLikeLabel(s: string): boolean {
+      if (!s) return false;
+      if (s.length < 2 || s.length > 240) return false;
+      // Reject if it's clearly the option list collapsed into one blob.
+      if (s.split(/\s+/).length > 40) return false;
+      return true;
+    }
+
     function labelFor(el: HTMLElement): string {
       const id = el.getAttribute("id");
       if (id) {
@@ -18,8 +32,28 @@ export async function detectFormFields(target: FormTarget): Promise<DetectedFiel
       }
       const wrapLabel = el.closest("label");
       if (wrapLabel?.textContent) return wrapLabel.textContent.trim();
-      const aria = el.getAttribute("aria-label") || el.getAttribute("aria-labelledby");
-      if (aria) return aria;
+      const ariaLbl = el.getAttribute("aria-label");
+      if (ariaLbl) return ariaLbl.trim();
+      const ariaLbldBy = el.getAttribute("aria-labelledby");
+      if (ariaLbldBy) {
+        const parts = ariaLbldBy.split(/\s+/).map((i) => document.getElementById(i)?.textContent?.trim() || "").filter(Boolean);
+        if (parts.length) return parts.join(" ").slice(0, 240);
+      }
+      // Walk up looking for a preceding sibling that looks like a label
+      // (common React form pattern: <div class="label">…</div><div><input/></div>).
+      let cur: HTMLElement | null = el;
+      for (let i = 0; cur && i < 5; i++) {
+        let sib: Element | null = cur.previousElementSibling;
+        while (sib) {
+          // skip empty wrappers
+          const t = textOf(sib);
+          if (looksLikeLabel(t) && !sib.querySelector("input,select,textarea,[role=combobox],[role=radiogroup]")) {
+            return t;
+          }
+          sib = sib.previousElementSibling;
+        }
+        cur = cur.parentElement;
+      }
       const ph = (el as HTMLInputElement).placeholder;
       if (ph) return ph;
       const name = el.getAttribute("name");
@@ -27,12 +61,9 @@ export async function detectFormFields(target: FormTarget): Promise<DetectedFiel
     }
 
     function groupLabelFor(el: HTMLElement): string {
-      // Prefer a parent fieldset's legend, then the closest label-like
-      // ancestor's heading text. Falls back to labelFor.
       const fs = el.closest("fieldset");
       const legend = fs?.querySelector(":scope > legend")?.textContent?.trim();
       if (legend) return legend;
-      // Walk up looking for a sibling .label / heading or aria-labelledby on a wrapper.
       let cur: HTMLElement | null = el.parentElement;
       for (let i = 0; cur && i < 6; i++) {
         const labelled = cur.getAttribute("aria-labelledby");
@@ -61,22 +92,115 @@ export async function detectFormFields(target: FormTarget): Promise<DetectedFiel
       return input.value || "";
     }
 
+    /** Extract options from a custom dropdown (combobox/listbox/aria-haspopup). */
+    function customSelectOptions(el: HTMLElement): string[] {
+      const out = new Set<string>();
+      const collectFrom = (root: Element | null) => {
+        if (!root) return;
+        const opts = root.querySelectorAll('[role="option"], li, option');
+        opts.forEach((o) => {
+          const t = textOf(o);
+          if (t && t.length < 120) out.add(t);
+        });
+      };
+      // aria-controls → popup element
+      const controls = el.getAttribute("aria-controls");
+      if (controls) {
+        controls.split(/\s+/).forEach((id) => collectFrom(document.getElementById(id)));
+      }
+      // aria-owns
+      const owns = el.getAttribute("aria-owns");
+      if (owns) {
+        owns.split(/\s+/).forEach((id) => collectFrom(document.getElementById(id)));
+      }
+      // any descendant listbox
+      collectFrom(el.querySelector('[role="listbox"], ul, ol'));
+      // adjacent sibling listbox in the same parent
+      const parent = el.parentElement;
+      if (parent) {
+        parent.querySelectorAll(':scope > [role="listbox"], :scope > ul[role="listbox"]').forEach((n) => collectFrom(n));
+      }
+      return Array.from(out).slice(0, 60);
+    }
+
+    /** Extract options from a custom radio-group ([role=radiogroup] with [role=radio] children). */
+    function customRadioOptions(el: HTMLElement): string[] {
+      const out: string[] = [];
+      el.querySelectorAll('[role="radio"]').forEach((r) => {
+        const t = r.getAttribute("aria-label") || textOf(r);
+        if (t) out.push(t.slice(0, 120));
+      });
+      return out;
+    }
+
     const fields: any[] = [];
     let idx = 0;
     const handledGroups = new Set<string>();
+    const seen = new WeakSet<Element>();
+
+    // Wider selector: include custom ARIA widgets common in React forms
+    // (Airbnb, LinkedIn, MUI, Headless UI, Radix, etc.).
     const inputs = Array.from(
       document.querySelectorAll<HTMLElement>(
-        "input, select, textarea, [role=combobox], [contenteditable=true]"
+        [
+          "input",
+          "select",
+          "textarea",
+          "[role=combobox]",
+          "[role=radiogroup]",
+          "[role=listbox]",
+          "[aria-haspopup=listbox]",
+          "[contenteditable=true]",
+        ].join(", ")
       )
     );
     for (const el of inputs) {
+      if (seen.has(el)) continue;
       const tag = el.tagName.toLowerCase();
       const typeAttr = (el.getAttribute("type") || "").toLowerCase();
+      const role = (el.getAttribute("role") || "").toLowerCase();
       if (["hidden", "submit", "button", "image", "reset"].includes(typeAttr)) continue;
       const rect = el.getBoundingClientRect();
-      if (rect.width === 0 && rect.height === 0) continue;
+      // Custom widgets may be display:none until clicked — accept if they're in DOM.
+      const isCustom = role === "combobox" || role === "radiogroup" || role === "listbox" || el.getAttribute("aria-haspopup") === "listbox";
+      if (!isCustom && rect.width === 0 && rect.height === 0) continue;
 
-      // --- Radio / checkbox group detection ---
+      // --- Custom radio-group ([role=radiogroup]) ---
+      if (role === "radiogroup") {
+        const options = customRadioOptions(el);
+        const required = el.getAttribute("aria-required") === "true";
+        const fieldId = `f_${idx++}`;
+        el.setAttribute("data-jobgenie-id", fieldId);
+        // Mark its [role=radio] children so we skip them later
+        el.querySelectorAll('[role="radio"]').forEach((r) => seen.add(r));
+        fields.push({
+          fieldId,
+          label: groupLabelFor(el).slice(0, 200),
+          type: "radio-group",
+          required,
+          options,
+        });
+        continue;
+      }
+
+      // --- Custom combobox / listbox / aria-haspopup=listbox ---
+      if (isCustom) {
+        const options = customSelectOptions(el);
+        const required = el.getAttribute("aria-required") === "true" || el.hasAttribute("required");
+        const fieldId = `f_${idx++}`;
+        el.setAttribute("data-jobgenie-id", fieldId);
+        fields.push({
+          fieldId,
+          label: labelFor(el).slice(0, 200),
+          type: options.length > 0 ? "select" : "text",
+          required,
+          options: options.length > 0 ? options : undefined,
+          placeholder: (el as HTMLInputElement).placeholder || undefined,
+        });
+        continue;
+      }
+
+      // --- Native radio / checkbox group detection ---
       if ((typeAttr === "radio" || typeAttr === "checkbox") && el.getAttribute("name")) {
         const name = (el as HTMLInputElement).name;
         const groupKey = `${typeAttr}:${name}`;
@@ -93,7 +217,10 @@ export async function detectFormFields(target: FormTarget): Promise<DetectedFiel
             (p) => p.hasAttribute("required") || p.getAttribute("aria-required") === "true"
           );
           const fieldId = `f_${idx++}`;
-          peers.forEach((p) => p.setAttribute("data-jobgenie-id", fieldId));
+          peers.forEach((p) => {
+            p.setAttribute("data-jobgenie-id", fieldId);
+            seen.add(p);
+          });
           fields.push({
             fieldId,
             label: groupLabelFor(el).slice(0, 200),
@@ -103,7 +230,6 @@ export async function detectFormFields(target: FormTarget): Promise<DetectedFiel
           });
           continue;
         }
-        // single radio/checkbox falls through to default handling
       }
 
       let type = tag;

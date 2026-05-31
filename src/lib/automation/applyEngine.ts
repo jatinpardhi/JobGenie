@@ -176,6 +176,7 @@ export async function runApplication(input: ApplyJobInput) {
         });
         let merged = probe.fields
           .filter((f) => f.type !== "file")
+          .filter((f) => !/^(input|select|textarea|text|button)$/i.test((f.label || "").trim()))
           .map((f) => ({
             fieldId: f.fieldId,
             label: f.label,
@@ -188,7 +189,10 @@ export async function runApplication(input: ApplyJobInput) {
           try {
             const prev = JSON.parse(existingProfile.questions) as typeof merged;
             const byLabel = new Map(merged.map((q) => [q.label, q]));
-            for (const q of prev) if (!byLabel.has(q.label)) merged.push(q);
+            for (const q of prev) {
+              if (/^(input|select|textarea|text|button)$/i.test((q.label || "").trim())) continue;
+              if (!byLabel.has(q.label)) merged.push(q);
+            }
           } catch { /* ignore parse */ }
         }
         const completed = pendingQuestions.filter((q) => q.required).length === 0;
