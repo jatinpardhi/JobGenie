@@ -30,6 +30,7 @@ export function RecentApplications({ initialTotal }: { initialTotal: number }) {
   const [done, setDone] = useState(false);
   const [total, setTotal] = useState(initialTotal);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const loadMore = useCallback(async () => {
     if (loading || done) return;
@@ -50,15 +51,16 @@ export function RecentApplications({ initialTotal }: { initialTotal: number }) {
   // Initial load
   useEffect(() => { loadMore(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-  // Scroll-triggered loading via IntersectionObserver
+  // Scroll-triggered loading inside the card's own scroll container
   useEffect(() => {
     const node = sentinelRef.current;
-    if (!node) return;
+    const root = scrollRef.current;
+    if (!node || !root) return;
     const io = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) loadMore();
       },
-      { rootMargin: "300px 0px" }
+      { root, rootMargin: "200px 0px" }
     );
     io.observe(node);
     return () => io.disconnect();
@@ -78,8 +80,9 @@ export function RecentApplications({ initialTotal }: { initialTotal: number }) {
         </div>
       </div>
       <div className="card mt-3 overflow-hidden p-0">
+        <div ref={scrollRef} className="max-h-[520px] overflow-y-auto">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500 dark:bg-slate-900">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs uppercase text-slate-500 dark:bg-slate-900">
             <tr>
               <th className="p-3">Job</th>
               <th className="p-3">Status</th>
@@ -122,6 +125,7 @@ export function RecentApplications({ initialTotal }: { initialTotal: number }) {
         </table>
         <div ref={sentinelRef} className="flex items-center justify-center px-3 py-4 text-xs text-slate-500">
           {loading ? "Loading…" : done ? (apps.length > 0 ? "End of list" : "") : "Scroll to load more"}
+        </div>
         </div>
       </div>
     </section>
