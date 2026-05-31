@@ -33,7 +33,11 @@ export async function detectFormFields(target: FormTarget): Promise<DetectedFiel
       const wrapLabel = el.closest("label");
       if (wrapLabel?.textContent) return wrapLabel.textContent.trim();
       const ariaLbl = el.getAttribute("aria-label");
-      if (ariaLbl) return ariaLbl.trim();
+      // Skip generic widget aria-labels ("Search", "Choose…", "Select") so we
+      // fall through to DOM walking and find the real field label.
+      if (ariaLbl && !/^(search|choose|select|option|combobox|dropdown|list of )/i.test(ariaLbl.trim())) {
+        return ariaLbl.trim();
+      }
       const ariaLbldBy = el.getAttribute("aria-labelledby");
       if (ariaLbldBy) {
         const parts = ariaLbldBy.split(/\s+/).map((i) => document.getElementById(i)?.textContent?.trim() || "").filter(Boolean);
@@ -257,7 +261,32 @@ export async function detectFormFields(target: FormTarget): Promise<DetectedFiel
         placeholder: (el as HTMLInputElement).placeholder || undefined,
       });
     }
-    return fields;
+    // Collapse duplicates (custom react-select wrappers commonly produce two
+    // entries for the same label — outer container + inner search input).
+    // Prefer the entry that has options or a non-text type. Keep typing
+    // inputs (text/tel/email/url/textarea) separate from choice widgets
+    // (select/radio/checkbox) so a "Phone" tel input doesn't get eaten by
+    // a "Phone" country-code combobox that happens to share the label.
+    const score = (f: any) =>
+      (Array.isArray(f.options) && f.options.length ? 4 : 0) +
+      (f.type === "radio-group" || f.type === "checkbox-group" ? 3 : 0) +
+      (f.type === "select" ? 2 : 0) +
+      (f.required ? 1 : 0);
+    const isChoice = (t: string) =>
+      t === "select" || t === "radio-group" || t === "checkbox-group" || t === "radio" || t === "checkbox";
+    const normLabel = (s: string) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const looksLikeNoise = (s: string) =>
+      /^(no results( found)?|loading|placeholder|combobox|listbox|dropdown|menu|select an option)/i.test(s.trim());
+    const byLabel = new Map<string, any>();
+    for (const f of fields) {
+      if (looksLikeNoise(f.label || "")) continue;
+      const key = normLabel(f.label) + "|" + (isChoice(f.type) ? "choice" : "input");
+      if (!key.startsWith("|")) {
+        const prev = byLabel.get(key);
+        if (!prev || score(f) > score(prev)) byLabel.set(key, f);
+      }
+    }
+    return Array.from(byLabel.values());
   });
 }
 
