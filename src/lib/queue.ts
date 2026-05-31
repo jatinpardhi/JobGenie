@@ -138,15 +138,20 @@ export async function enqueueSearch(data: { searchId: string; userId: string }) 
       });
       log.info("inline search done", { jobs: jobs.length, created, ms: Date.now() - started });
     } catch (e: any) {
-      const msg = String(e?.message ?? e);
-      log.error("inline search failed", { err: msg });
+      const raw = String(e?.message ?? e);
+      const isBlocked = e?.code === "BLOCKED" || raw.startsWith("BLOCKED:");
+      const friendly = isBlocked
+        ? raw.replace(/^BLOCKED:\s*/, "") +
+          " The site detects automated browsers. Try a direct Greenhouse/Lever/Workday/Ashby link instead."
+        : raw;
+      log.error("inline search failed", { err: raw });
       try {
         await prisma.jobSearch.update({
           where: { id: data.searchId },
           data: {
-            lastStatus: "ERROR",
-            lastError: msg.slice(0, 500),
-            lastProgress: "Failed.",
+            lastStatus: isBlocked ? "BLOCKED" : "ERROR",
+            lastError: friendly.slice(0, 500),
+            lastProgress: isBlocked ? "Blocked by site." : "Failed.",
             lastRunAt: new Date(),
           },
         });

@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import { newContext } from "./browser";
+import { newContext, safeGoto } from "./browser";
 import { detectPlatform } from "./inspector";
 import { logger } from "../logger";
 
@@ -41,7 +41,7 @@ export async function discoverJobs(input: SearchInput): Promise<DiscoveredJob[]>
   const page = await ctx.newPage();
   try {
     await progress(`Opening ${new URL(input.portalUrl).host}…`);
-    await page.goto(input.portalUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await safeGoto(page, input.portalUrl, { timeout: 45_000, onRetry: progress });
     const platform = detectPlatform(input.portalUrl);
     await progress(`Loaded (${platform}). Looking for a search box…`);
 
