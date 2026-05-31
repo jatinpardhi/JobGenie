@@ -31,73 +31,96 @@ export default async function DashboardPage() {
     }),
   ]);
 
-  const stats: Array<{ label: string; value: number; href: string; accent?: string }> = [
-    { label: "Total", value: total, href: "/dashboard/applications" },
-    { label: "Submitted", value: submitted, href: "/dashboard/applications?status=SUBMITTED", accent: "text-green-700 dark:text-green-400" },
-    { label: "In progress", value: pending, href: "/dashboard/applications?status=RUNNING", accent: "text-blue-700 dark:text-blue-400" },
-    { label: "Needs approval", value: awaiting, href: "/dashboard/applications?status=AWAITING_APPROVAL", accent: "text-amber-700 dark:text-amber-400" },
-    { label: "Failed", value: failed, href: "/dashboard/applications?status=FAILED", accent: "text-red-700 dark:text-red-400" },
+  const stats = [
+    { key: "SUBMITTED",         label: "Submitted",      value: submitted, href: "/dashboard/applications?status=SUBMITTED",         color: "bg-emerald-500", dot: "bg-emerald-500" },
+    { key: "RUNNING",           label: "In progress",    value: pending,   href: "/dashboard/applications?status=RUNNING",           color: "bg-blue-500",    dot: "bg-blue-500" },
+    { key: "AWAITING_APPROVAL", label: "Needs approval", value: awaiting,  href: "/dashboard/applications?status=AWAITING_APPROVAL", color: "bg-amber-500",   dot: "bg-amber-500" },
+    { key: "FAILED",            label: "Failed",         value: failed,    href: "/dashboard/applications?status=FAILED",            color: "bg-rose-500",    dot: "bg-rose-500" },
   ];
+  const trackedSum = submitted + pending + awaiting + failed;
+  const other = Math.max(0, total - trackedSum);
+  if (other > 0) {
+    stats.push({ key: "OTHER", label: "Other", value: other, href: "/dashboard/applications", color: "bg-slate-400", dot: "bg-slate-400" });
+  }
+  const denom = total || 1;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <h1 className="text-2xl font-bold">Overview</h1>
 
       {incompletePortals.length > 0 && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/40">
-          <div className="flex items-start gap-3">
-            <span className="mt-0.5 text-lg text-amber-600 dark:text-amber-400">⚠</span>
-            <div className="min-w-0 flex-1">
-              <h2 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-                {incompletePortals.length} portal{incompletePortals.length === 1 ? "" : "s"} need your input
-              </h2>
-              <p className="mt-0.5 text-xs text-amber-800/90 dark:text-amber-300/90">
-                Fill standard questions <strong>once</strong> per portal and JobGenie will
-                auto-apply every future job from that portal without asking again.
-              </p>
-              <ul className="mt-2 flex flex-wrap gap-1.5">
-                {incompletePortals.map((p) => {
-                  let count = 0;
-                  try { count = (JSON.parse(p.questions) as unknown[]).length; } catch {}
-                  return (
-                    <li key={p.id}>
-                      <Link
-                        href="/dashboard/portals"
-                        className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-slate-900 dark:text-amber-200 dark:hover:bg-slate-800"
-                      >
-                        {prettyPortal(p.portal)}
-                        <span className="text-amber-600 dark:text-amber-400">· {count} q</span>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-            <Link
-              href="/dashboard/portals"
-              className="btn-primary shrink-0 whitespace-nowrap !py-1.5 !text-xs"
-            >
-              Fill now →
-            </Link>
-          </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs dark:border-amber-800 dark:bg-amber-950/40">
+          <span className="text-amber-600 dark:text-amber-400">⚠</span>
+          <span className="font-semibold text-amber-900 dark:text-amber-200">
+            {incompletePortals.length} portal{incompletePortals.length === 1 ? "" : "s"} need your input
+          </span>
+          <ul className="flex flex-wrap gap-1.5">
+            {incompletePortals.map((p) => {
+              let count = 0;
+              try { count = (JSON.parse(p.questions) as unknown[]).length; } catch {}
+              return (
+                <li key={p.id}>
+                  <Link
+                    href="/dashboard/portals"
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-slate-900 dark:text-amber-200 dark:hover:bg-slate-800"
+                  >
+                    {prettyPortal(p.portal)}
+                    <span className="text-amber-600 dark:text-amber-400">· {count} q</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+          <Link href="/dashboard/portals" className="ml-auto text-[11px] font-semibold text-brand underline">
+            Fill now →
+          </Link>
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-        {stats.map((s) => (
-          <Link
-            key={s.label}
-            href={s.href}
-            className="card group transition hover:border-brand hover:shadow-md"
-          >
-            <p className="text-xs uppercase tracking-wide text-slate-500">{s.label}</p>
-            <p className={`mt-2 text-3xl font-semibold ${s.accent ?? ""}`}>{s.value}</p>
-            <p className="mt-1 text-[10px] text-slate-400 opacity-0 transition group-hover:opacity-100">
-              View →
-            </p>
+      <section className="card p-4">
+        <div className="mb-2 flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            Applications · <span className="text-slate-900 dark:text-slate-100">{total}</span>
+          </h2>
+          <Link href="/dashboard/applications" className="text-xs text-brand underline">
+            Open all →
           </Link>
-        ))}
-      </div>
+        </div>
+        {total === 0 ? (
+          <p className="py-3 text-sm text-slate-500">No applications yet — create a search to start.</p>
+        ) : (
+          <>
+            <div className="flex h-3 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+              {stats.filter((s) => s.value > 0).map((s) => {
+                const pct = (s.value / denom) * 100;
+                return (
+                  <Link
+                    key={s.key}
+                    href={s.href}
+                    title={`${s.label}: ${s.value} (${pct.toFixed(0)}%)`}
+                    style={{ width: `${pct}%` }}
+                    className={`group relative h-full ${s.color} transition hover:brightness-110`}
+                  >
+                    <span className="pointer-events-none absolute -top-9 left-1/2 z-10 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[11px] font-medium text-white shadow group-hover:block dark:bg-slate-100 dark:text-slate-900">
+                      {s.label}: {s.value} ({pct.toFixed(0)}%)
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+            <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+              {stats.map((s) => (
+                <li key={s.key}>
+                  <Link href={s.href} className="inline-flex items-center gap-1.5 text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white">
+                    <span className={`inline-block h-2.5 w-2.5 rounded-sm ${s.dot}`} />
+                    {s.label} <span className="tabular-nums text-slate-400">· {s.value}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </section>
 
       <RecentApplications initialTotal={total} />
     </div>
